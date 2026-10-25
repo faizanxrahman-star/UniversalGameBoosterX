@@ -1,0 +1,41 @@
+name: Build Universal Game Booster X APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Unpack ZIP automatically
+        run: |
+          if [ -f "Universal_Game_Booster_X_Android_Project.zip" ]; then
+            unzip -o Universal_Game_Booster_X_Android_Project.zip
+          fi
+          if [ -d "UniversalGameBoosterX" ] && [ ! -f "settings.gradle.kts" ]; then
+            cp -r UniversalGameBoosterX/* .
+          fi
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Run Unit Tests & Build Debug APK
+        run: gradle testDebugUnitTest assembleDebug
+
+      - name: Upload Compiled Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Universal-Game-Booster-X-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
