@@ -1,0 +1,80 @@
+name: Build Universal Game Booster X APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Unpack ZIP & Auto-Repair All Kotlin/Gradle Files
+        run: |
+          ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+          if [ -n "$ZIP_FILE" ]; then
+            echo "Found ZIP: $ZIP_FILE"
+            unzip -o "$ZIP_FILE"
+          fi
+          if [ -d "UniversalGameBoosterX" ] && [ ! -f "settings.gradle.kts" ]; then
+            cp -r UniversalGameBoosterX/* .
+          fi
+
+          # 1. Fix broken multiline string in OptionalAiAssistantAdvisor.kt
+          cat << 'KT' > feature-settings/src/main/java/com/universalgaming/boosterx/feature/settings/OptionalAiAssistantAdvisor.kt
+          package com.universalgaming.boosterx.feature.settings
+
+          class OptionalAiAssistantAdvisor {
+              fun explainMetricsOffline(
+                  batteryTempC: Float?,
+                  availableRamMb: Long,
+                  avgPingMs: Long?
+              ): String {
+                  val parts = mutableListOf<String>()
+                  if (batteryTempC != null) {
+                      if (batteryTempC >= 41f) {
+                          parts.add("Thermal Analysis: Battery is at ${"%.1f".format(batteryTempC)}C. Android thermal daemon may scale down clocks.")
+                      } else {
+                          parts.add("Thermal Analysis: Battery is at a healthy ${"%.1f".format(batteryTempC)}C.")
+                      }
+                  }
+                  parts.add("Memory Analysis: $availableRamMb MB RAM available.")
+                  if (avgPingMs != null) {
+                      parts.add("Network Analysis: Measured RTT is $avgPingMs ms.")
+                  }
+                  return parts.joinToString("\n\n")
+              }
+          }
+          KT
+
+          # 2. Fix compileSdk/targetSdk to 34 (pre-installed on GitHub Ubuntu runner)
+          find . -name "build.gradle.kts" -exec sed -i 's/compileSdk = 35/compileSdk = 34/g' {} +
+          find . -name "build.gradle.kts" -exec sed -i 's/targetSdk = 35/targetSdk = 34/g' {} +
+
+          # 3. Fix ic_dialog_info, SupportLevel, and dp import
+          sed -i 's/ic_Dialog_Info/ic_dialog_info/g' feature-floating-panel/src/main/java/com/universalgaming/boosterx/feature/floatingpanel/FloatingGamingOverlayService.kt || true
+          sed -i 's/SupportLevel.LIMITED_OR_UNSUPPORTED.let { SupportLevel.PARTIALLY_SUPPORTED }/SupportLevel.PARTIALLY_SUPPORTED/g' core-compatibility/src/main/java/com/universalgaming/boosterx/core/compatibility/SmartCompatibilityEngine.kt || true
+          grep -q "import androidx.compose.ui.unit.dp" app/src/main/java/com/universalgaming/boosterx/MainActivity.kt || sed -i 's/import androidx.compose.ui.Modifier/import androidx.compose.ui.Modifier\nimport androidx.compose.ui.unit.dp/g' app/src/main/java/com/universalgaming/boosterx/MainActivity.kt
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.9'
+
+      - name: Compile Debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload Compiled Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Universal-Game-Booster-X-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
